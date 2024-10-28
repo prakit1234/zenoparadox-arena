@@ -1,224 +1,271 @@
 // game.js
-
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Asset loading
-const playerImage = new Image();
-playerImage.src = 'assets/player.png';
-const enemyImage = new Image();
-enemyImage.src = 'assets/enemy.png';
-const bulletImage = new Image();
-bulletImage.src = 'assets/bullet.png';
-const bombImage = new Image(); // Add bomb image
-bombImage.src = 'assets/bomb.png';
-const backgroundImage = new Image();
-backgroundImage.src = 'assets/background.png';
+// Set canvas to full screen
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
-// Game Variables
-let player = {
-    x: 50,
-    y: canvas.height / 2,
-    width: 50,
-    height: 50,
-    health: 100,
-    maxHealth: 100,
-    shootingPower: 10,
-    speed: 5
+// Enhanced Asset loading with better quality images
+const assets = {
+    player: loadImage('assets/player.png', 2048), // Using higher resolution images
+    enemy: loadImage('assets/enemy.png', 2048),
+    bullet: loadImage('assets/bullet.png', 1024),
+    bomb: loadImage('assets/bomb.png', 1024),
+    background: loadImage('assets/background.png', 4096)
 };
 
-let bullets = [];
-let enemies = [];
-let enemySpawnInterval = 2000; // milliseconds
-let lastEnemySpawnTime = 0;
-let score = 0;
-let hasBomb = false;
-
-// Initialize enemies
-function createEnemy() {
-    enemies.push({
-        x: canvas.width,
-        y: Math.random() * (canvas.height - 50),
-        width: 40,
-        height: 40,
-        health: 20,
-        speed: 2,
-        attackPower: 5,
-        lastAttackTime: 0,
-        attackCooldown: 1000 // 1 second cooldown between attacks
-    });
+function loadImage(src, size) {
+    const img = new Image();
+    img.src = src;
+    img.width = size;
+    img.height = size;
+    return img;
 }
 
-// Game Loop
-function gameLoop(timestamp) {
-    ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
-    
-    handlePlayerMovement();
-    updateAndDrawBullets();
-    updateAndDrawEnemies(timestamp);
-    drawPlayer();
-    drawHealthBar();
-    drawScore();
-    checkBombAvailability();
-    
-    // Spawn enemies
-    if (timestamp - lastEnemySpawnTime > enemySpawnInterval) {
-        createEnemy();
-        lastEnemySpawnTime = timestamp;
+// Enhanced Game Variables
+let player = {
+    x: 100,
+    y: canvas.height / 2,
+    width: 80,  // Increased size
+    height: 80,
+    health: 100,
+    maxHealth: 100,
+    shootingPower: 15,
+    speed: 8,
+    isInvulnerable: false,
+    invulnerabilityDuration: 1000
+};
+
+let gameState = {
+    bullets: [],
+    enemies: [],
+    enemySpawnInterval: 1500,
+    lastEnemySpawnTime: 0,
+    score: 0,
+    hasBomb: false,
+    isGameOver: false,
+    isPaused: false
+};
+
+// Enhanced bullet properties
+const BULLET_CONFIG = {
+    width: 40,  // Larger bullets
+    height: 25,
+    speed: 15,
+    color: '#ff0000',
+    glowColor: '#ff6666'
+};
+
+// Key tracking with improved responsiveness
+let keys = {
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false,
+    Space: false
+};
+
+// Enhanced event listeners
+window.addEventListener('keydown', (e) => {
+    if (e.key in keys) {
+        keys[e.key] = true;
+        if (e.key === 'Space') {
+            e.preventDefault(); // Prevent page scrolling
+        }
     }
+    if (e.key === 'p') togglePause();
+    if (e.key === 'r' && gameState.isGameOver) restartGame();
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key in keys) keys[e.key] = false;
+});
+
+// Enhanced enemy creation
+function createEnemy() {
+    return {
+        x: canvas.width,
+        y: Math.random() * (canvas.height - 80),
+        width: 60,
+        height: 60,
+        health: 30,
+        speed: 2 + Math.random() * 2,
+        attackPower: 10,
+        lastAttackTime: 0,
+        attackCooldown: 800,
+        glowIntensity: 0
+    };
+}
+
+// Enhanced game loop with smooth animations
+function gameLoop(timestamp) {
+    if (gameState.isPaused) {
+        drawPauseScreen();
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
+    // Parallax background
+    drawParallaxBackground(timestamp);
+    
+    if (!gameState.isGameOver) {
+        handlePlayerMovement();
+        updateAndDrawBullets();
+        updateAndDrawEnemies(timestamp);
+        drawPlayer();
+        drawEnhancedHUD();
+        spawnEnemies(timestamp);
+    }
+
     requestAnimationFrame(gameLoop);
 }
 
-// Handle Player Movement
-function handlePlayerMovement() {
-    if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
-    if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
-    if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
-    if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
+// Enhanced visual effects
+function drawParallaxBackground(timestamp) {
+    const scrollSpeed = 2;
+    const backgroundPos = -(timestamp * scrollSpeed) % canvas.width;
+    
+    ctx.drawImage(assets.background, backgroundPos, 0, canvas.width, canvas.height);
+    ctx.drawImage(assets.background, backgroundPos + canvas.width, 0, canvas.width, canvas.height);
 }
 
-// Draw Player
-function drawPlayer() {
-    ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
+// Enhanced HUD
+function drawEnhancedHUD() {
+    // Health bar with gradient and glow
+    const healthBarWidth = 300;
+    const healthBarHeight = 30;
+    const healthPercentage = player.health / player.maxHealth;
+    
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0, 255, 0, 0.5)';
+    
+    const gradient = ctx.createLinearGradient(10, 10, healthBarWidth, healthBarHeight);
+    gradient.addColorStop(0, '#00ff00');
+    gradient.addColorStop(1, '#66ff66');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(10, 10, healthBarWidth * healthPercentage, healthBarHeight);
+    
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(10, 10, healthBarWidth, healthBarHeight);
+    
+    // Score display with glow
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 30px Arial';
+    ctx.shadowBlur = 5;
+    ctx.shadowColor = '#00ff00';
+    ctx.fillText(`Score: ${gameState.score}`, 10, 70);
+    
+    ctx.restore();
 }
 
-// Update and draw bullets
-function updateAndDrawBullets() {
-    bullets.forEach((bullet, index) => {
-        bullet.x += bullet.speed;
-        ctx.drawImage(bulletImage, bullet.x, bullet.y, bullet.width, bullet.height);
-        
-        // Remove bullet if it goes off screen
-        if (bullet.x > canvas.width) {
-            bullets.splice(index, 1);
-        }
-        
-        // Check for collision with enemies
-        enemies.forEach((enemy, enemyIndex) => {
-            if (collision(bullet, enemy)) {
-                enemy.health -= player.shootingPower;
-                bullets.splice(index, 1);
-                if (enemy.health <= 0) {
-                    enemies.splice(enemyIndex, 1);
-                    score += 10; // Increase score when enemy is defeated
-                }
-            }
-        });
-        
-        // Check for collision with player for enemy bullets
-        if (bullet.isEnemyBullet && collision(bullet, player)) {
-            player.health -= 10; // Player takes damage from enemy bullets
-            bullets.splice(index, 1);
-            if (player.health <= 0) {
-                gameOver();
-            }
-        }
-    });
+// Enhanced game over screen
+function gameOver() {
+    gameState.isGameOver = true;
+    
+    // Create modal overlay
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        padding: 40px;
+        border-radius: 10px;
+        text-align: center;
+        z-index: 1000;
+    `;
+    
+    const gameOverText = document.createElement('h1');
+    gameOverText.textContent = 'Game Over!';
+    gameOverText.style.color = '#ff0000';
+    
+    const scoreText = document.createElement('p');
+    scoreText.textContent = `Final Score: ${gameState.score}`;
+    scoreText.style.color = '#ffffff';
+    
+    const restartButton = createButton('Restart Game', restartGame);
+    const reportButton = createButton('Report Bug', reportBug);
+    
+    modal.appendChild(gameOverText);
+    modal.appendChild(scoreText);
+    modal.appendChild(restartButton);
+    modal.appendChild(reportButton);
+    
+    document.body.appendChild(modal);
 }
 
-// Update and draw enemies
-function updateAndDrawEnemies(timestamp) {
-    enemies.forEach((enemy, index) => {
-        enemy.x -= enemy.speed;
-        ctx.drawImage(enemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
-        
-        // Highlight effect
-        ctx.strokeStyle = 'yellow';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(enemy.x, enemy.y, enemy.width, enemy.height);
-
-        // Enemy attack
-        if (timestamp - enemy.lastAttackTime > enemy.attackCooldown) {
-            if (collision(player, enemy)) {
-                player.health -= enemy.attackPower;
-                enemy.lastAttackTime = timestamp;
-                if (player.health <= 0) {
-                    gameOver();
-                }
-            }
-        }
-
-        // Enemy shooting
-        if (Math.random() < 0.01) { // 1% chance to shoot each frame
-            enemyShoot(enemy);
-        }
-        
-        // Remove enemy if it goes off screen
-        if (enemy.x + enemy.width < 0) {
-            enemies.splice(index, 1);
-        }
-    });
+function createButton(text, onClick) {
+    const button = document.createElement('button');
+    button.textContent = text;
+    button.style.cssText = `
+        background: #4CAF50;
+        border: none;
+        color: white;
+        padding: 15px 32px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+        margin: 4px 2px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: 0.3s;
+    `;
+    button.addEventListener('click', onClick);
+    button.addEventListener('mouseover', () => button.style.background = '#45a049');
+    button.addEventListener('mouseout', () => button.style.background = '#4CAF50');
+    return button;
 }
 
-// Enemy shooting function
-function enemyShoot(enemy) {
-    bullets.push({
-        x: enemy.x,
-        y: enemy.y + enemy.height / 2,
-        width: 10,
-        height: 5,
-        speed: -5,
-        isEnemyBullet: true
-    });
+function reportBug() {
+    window.open('https://github.com/yourusername/yourgame/issues', '_blank');
 }
 
-// Shoot function
-function shoot() {
-    bullets.push({
-        x: player.x + player.width,
-        y: player.y + player.height / 2 - 7.5,
-        width: 20,
-        height: 15,
-        speed: 10,
-        isEnemyBullet: false
-    });
+function restartGame() {
+    // Reset all game state
+    player.health = player.maxHealth;
+    gameState = {
+        bullets: [],
+        enemies: [],
+        enemySpawnInterval: 1500,
+         lastEnemySpawnTime: 0,
+        score: 0,
+        hasBomb: false,
+        isGameOver: false,
+        isPaused: false
+    };
+    document.body.removeChild(document.querySelector('.modal'));
+    gameLoop(0);
 }
 
-// Draw health bar
-function drawHealthBar() {
-    ctx.fillStyle = 'green';
-    ctx.fillRect(10, 10, player.health / player.maxHealth * 100, 20);
-    ctx.strokeStyle = 'black';
-    ctx.strokeRect(10, 10, 100, 20);
-}
-
-// Draw score
-function drawScore() {
-    ctx.fillStyle = 'white';
-    ctx.font = '20px Arial';
-    ctx.fillText(`Score: ${score}`, 10, 30);
-}
-
-// Check bomb availability
-function checkBombAvailability() {
-    if (score >= 100 && !hasBomb) {
-        hasBomb = true;
-        // Display bomb icon or notification
-        ctx.drawImage(bombImage, canvas.width - 50, 10, 40, 40);
+function togglePause() {
+    gameState.isPaused = !gameState.isPaused;
+    if (gameState.isPaused) {
+        drawPauseScreen();
+    } else {
+        gameLoop(0);
     }
 }
 
-// Game over function
-function gameOver() {
+function drawPauseScreen() {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'red';
+    ctx.fillStyle = '#ffffff';
     ctx.font = '48px Arial';
-    ctx.fillText('You Lose!', canvas.width / 2 - 100, canvas.height / 2);
-    // Stop the game loop or restart the game
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Paused', canvas.width / 2, canvas.height / 2);
 }
 
-// Collision detection
-function collision(obj1, obj2) {
-    if (obj1.x + obj1.width > obj2.x &&
-        obj1.x < obj2.x + obj2.width &&
-        obj1.y + obj1.height > obj2.y &&
-        obj1.y < obj2.y + obj2.height) {
-        return true;
-    }
-    return false;
-}
-
-// Initialize game
 gameLoop(0);
