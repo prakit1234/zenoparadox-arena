@@ -10,6 +10,8 @@ const enemyImage = new Image();
 enemyImage.src = 'assets/enemy.png';
 const bulletImage = new Image();
 bulletImage.src = 'assets/bullet.png';
+const bombImage = new Image(); // Add bomb image
+bombImage.src = 'assets/bomb.png';
 const backgroundImage = new Image();
 backgroundImage.src = 'assets/background.png';
 
@@ -29,6 +31,8 @@ let bullets = [];
 let enemies = [];
 let enemySpawnInterval = 2000; // milliseconds
 let lastEnemySpawnTime = 0;
+let score = 0;
+let hasBomb = false;
 
 // Initialize enemies
 function createEnemy() {
@@ -54,6 +58,8 @@ function gameLoop(timestamp) {
     updateAndDrawEnemies(timestamp);
     drawPlayer();
     drawHealthBar();
+    drawScore();
+    checkBombAvailability();
     
     // Spawn enemies
     if (timestamp - lastEnemySpawnTime > enemySpawnInterval) {
@@ -95,9 +101,19 @@ function updateAndDrawBullets() {
                 bullets.splice(index, 1);
                 if (enemy.health <= 0) {
                     enemies.splice(enemyIndex, 1);
+                    score += 10; // Increase score when enemy is defeated
                 }
             }
         });
+        
+        // Check for collision with player for enemy bullets
+        if (bullet.isEnemyBullet && collision(bullet, player)) {
+            player.health -= 10; // Player takes damage from enemy bullets
+            bullets.splice(index, 1);
+            if (player.health <= 0) {
+                gameOver();
+            }
+        }
     });
 }
 
@@ -107,16 +123,25 @@ function updateAndDrawEnemies(timestamp) {
         enemy.x -= enemy.speed;
         ctx.drawImage(enemyImage, enemy.x, enemy.y, enemy.width, enemy.height);
         
+        // Highlight effect
+        ctx.strokeStyle = 'yellow';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(enemy.x, enemy.y, enemy.width, enemy.height);
+
         // Enemy attack
         if (timestamp - enemy.lastAttackTime > enemy.attackCooldown) {
             if (collision(player, enemy)) {
                 player.health -= enemy.attackPower;
                 enemy.lastAttackTime = timestamp;
                 if (player.health <= 0) {
-                    console.log("Game Over!");
-                    // Implement game over logic here
+                    gameOver();
                 }
             }
+        }
+
+        // Enemy shooting
+        if (Math.random() < 0.01) { // 1% chance to shoot each frame
+            enemyShoot(enemy);
         }
         
         // Remove enemy if it goes off screen
@@ -126,79 +151,74 @@ function updateAndDrawEnemies(timestamp) {
     });
 }
 
-// Collision detection
-function collision(rect1, rect2) {
-    return rect1.x < rect2.x + rect2.width &&
-           rect1.x + rect1.width > rect2.x &&
-           rect1.y < rect2.y + rect2.height &&
-           rect1.y + rect1.height > rect2.y;
+// Enemy shooting function
+function enemyShoot(enemy) {
+    bullets.push({
+        x: enemy.x,
+        y: enemy.y + enemy.height / 2,
+        width: 10,
+        height: 5,
+        speed: -5,
+        isEnemyBullet: true
+    });
+}
+
+// Shoot function
+function shoot() {
+    bullets.push({
+        x: player.x + player.width,
+        y: player.y + player.height / 2 - 7.5,
+        width: 20,
+        height: 15,
+        speed: 10,
+        isEnemyBullet: false
+    });
 }
 
 // Draw health bar
 function drawHealthBar() {
-    const barWidth = 200;
-    const barHeight = 20;
-    const x = 10;
-    const y = canvas.height - barHeight - 10;
-    
-    ctx.fillStyle = 'red';
-    ctx.fillRect(x, y, barWidth, barHeight);
-    
-    const healthWidth = (player.health / player.maxHealth) * barWidth;
     ctx.fillStyle = 'green';
-    ctx.fillRect(x, y, healthWidth, barHeight);
-    
-    ctx.strokeStyle = 'white';
-    ctx.strokeRect(x, y, barWidth, barHeight);
-    
+    ctx.fillRect(10, 10, player.health / player.maxHealth * 100, 20);
+    ctx.strokeStyle = 'black';
+    ctx.strokeRect(10, 10, 100, 20);
+}
+
+// Draw score
+function drawScore() {
     ctx.fillStyle = 'white';
-    ctx.font = '16px Arial';
-    ctx.fillText(`Health: ${player.health}/${player.maxHealth}`, x + 5, y + 15);
+    ctx.font = '20px Arial';
+    ctx.fillText(`Score: ${score}`, 10, 30);
 }
 
-// Shoot bullet
-function shoot() {
-    bullets.push({
-        x: player.x + player.width,
-        y: player.y + player.height / 2 - 5,
-        width: 10,
-        height: 5,
-        speed: 10,
-    });
-}
-
-// Key state
-let keys = {};
-
-// Event listeners
-document.addEventListener('keydown', (event) => {
-    keys[event.code] = true;
-    if (event.code === 'Space') {
-        shoot();
+// Check bomb availability
+function checkBombAvailability() {
+    if (score >= 100 && !hasBomb) {
+        hasBomb = true;
+        // Display bomb icon or notification
+        ctx.drawImage(bombImage, canvas.width - 50, 10, 40, 40);
     }
-});
-
-document.addEventListener('keyup', (event) => {
-    keys[event.code] = false;
-});
-
-// Image loading function
-function loadImage(img) {
-    return new Promise((resolve, reject) => {
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-    });
 }
 
-// Wait for images to load before starting the game
-Promise.all([
-    loadImage(playerImage),
-    loadImage(enemyImage),
-    loadImage(bulletImage),
-    loadImage(backgroundImage)
-]).then(() => {
-    // Start the game loop once all images are loaded
-    requestAnimationFrame(gameLoop);
-}).catch(error => {
-    console.error("Error loading images:", error);
-});
+// Game over function
+function gameOver() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'red';
+    ctx.font = '48px Arial';
+    ctx.fillText('You Lose!', canvas.width / 2 - 100, canvas.height / 2);
+    // Stop the game loop or restart the game
+}
+
+// Collision detection
+function collision(obj1, obj2) {
+    if (obj1.x + obj1.width > obj2.x &&
+        obj1.x < obj2.x + obj2.width &&
+        obj1.y + obj1.height > obj2.y &&
+        obj1.y < obj2.y + obj2.height) {
+        return true;
+    }
+    return false;
+}
+
+// Initialize game
+gameLoop(0);
