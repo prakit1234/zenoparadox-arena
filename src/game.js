@@ -154,7 +154,7 @@ function handlePlayerMovement() {
     if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
     
     // Handle shooting with cooldown
-    if (keys.Space && performance.now() - gameState.lastShootTime > gameState.shootCooldown) {
+    if (keys.Space && performance.now() - gameState.last ShootTime > gameState.shootCooldown) {
         shoot();
         gameState.lastShootTime = performance.now();
     }
@@ -223,31 +223,7 @@ function drawEnemies() {
     });
 }
 
-// Add event listeners
-window.addEventListener('keydown', (e) => {
-    if (e.key in keys) {
-        keys[e.key] = true;
-        if (e.key === 'Space') {
-            e.preventDefault();
-        }
-    }
-    if (e.key === 'p') togglePause();
-    if (e.key === 'r' && gameState.isGameOver) restartGame();
-});
-
-window.addEventListener('keyup', (e) => {
-    if (e.key in keys) keys[e.key] = false;
-});
-
-// Utility functions remain the same as in your original code
-function collision(obj1, obj2) {
-    return !(
-        obj1.x + obj1.width < obj2.x ||
-        obj1.x > obj2.x + obj2.width ||
-        obj1.y + obj1.height < obj2.y ||
-        obj1.y > obj2.y + obj2.height
-    );
-} function drawParallaxBackground(time) {
+function drawParallaxBackground(time) {
     // Draw background layers
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -345,9 +321,34 @@ function restartGame() {
         isGameOver: false,
         isPaused: false,
         lastShootTime: 0,
-        shootCooldown: 250
+        shootCooldown:  250
     };
     lastTime = 0;
     accumulator = 0;
     requestAnimationFrame(gameLoop);
 }
+
+function collision(obj1, obj2) {
+    return !(
+        obj1.x + obj1.width < obj2.x ||
+        obj1.x > obj2.x + obj2.width ||
+        obj1.y + obj1.height < obj2.y ||
+        obj1.y > obj2.y + obj2.height
+    );
+}
+
+// Add event listeners
+window.addEventListener('keydown', (e) => {
+    if (e.key in keys) {
+        keys[e.key] = true;
+        if (e.key === 'Space') {
+            e.preventDefault();
+        }
+    }
+    if (e.key === 'p') togglePause();
+    if (e.key === 'r' && gameState.isGameOver) restartGame();
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key in keys) keys[e.key] = false;
+});
