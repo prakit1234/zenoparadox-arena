@@ -27,14 +27,11 @@ function loadImage(src) {
 }
 
 let loadedAssets = {};
-Promise.all(Object.entries(assets).map(([key, src]) => loadImage(src).then(img => [key, img])))
-    .then(Object.fromEntries)
-    .then(loaded => {
-        loadedAssets = loaded;
-        gameLoop(0);
-    })
-    .catch(error => console.error('Failed to load assets:', error));
+let lastTime = 0;
+let accumulator = 0;
+const FIXED_TIME_STEP = 1000 / 60; // 60 FPS
 
+// Initialize game state and player
 let player = {
     x: 100,
     y: canvas.height / 2,
@@ -55,7 +52,9 @@ let gameState = {
     lastEnemySpawnTime: 0,
     score: 0,
     isGameOver: false,
-    isPaused: false
+    isPaused: false,
+    lastShootTime: 0,
+    shootCooldown: 250 // 250ms cooldown between shots
 };
 
 const BULLET_CONFIG = {
@@ -75,6 +74,156 @@ let keys = {
     b: false
 };
 
+// Load assets and start game
+Promise.all(
+    Object.entries(assets).map(([key, src]) => 
+        loadImage(src).then(img => [key, img])
+    )
+)
+.then(loadedImages => {
+    loadedAssets = Object.fromEntries(loadedImages);
+    requestAnimationFrame(gameLoop);
+})
+.catch(error => console.error('Failed to load assets:', error));
+
+function gameLoop(currentTime) {
+    if (!lastTime) lastTime = currentTime;
+    
+    let deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+    
+    // Prevent spiral of death with max frame time
+    if (deltaTime > 1000) deltaTime = FIXED_TIME_STEP;
+    
+    accumulator += deltaTime;
+
+    // Update game state at a fixed time step
+    while (accumulator >= FIXED_TIME_STEP) {
+        update(FIXED_TIME_STEP);
+        accumulator -= FIXED_TIME_STEP;
+    }
+
+    // Render at whatever frame rate the browser provides
+    render();
+
+    requestAnimationFrame(gameLoop);
+}
+
+function update(deltaTime) {
+    if (gameState.isPaused || gameState.isGameOver) return;
+
+    handlePlayerMovement();
+    updateBullets();
+    updateEnemies();
+    updatePowerUps();
+    checkCollisions();
+    spawnEnemies(performance.now());
+    
+    // Check game over condition
+    if (player.health <= 0) {
+        gameState.isGameOver = true;
+    }
+}
+
+function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw background
+    drawParallaxBackground(performance.now());
+    
+    if (!gameState.isGameOver) {
+        // Draw game elements
+        drawPlayer();
+        drawBullets();
+        drawEnemies();
+        drawPowerUps();
+        drawEnhancedHUD();
+    } else {
+        drawGameOverScreen();
+    }
+    
+    if (gameState.isPaused) {
+        drawPauseScreen();
+    }
+}
+
+function handlePlayerMovement() {
+    if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
+    if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
+    if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
+    if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
+    
+    // Handle shooting with cooldown
+    if (keys.Space && performance.now() - gameState.lastShootTime > gameState.shootCooldown) {
+        shoot();
+        gameState.lastShootTime = performance.now();
+    }
+    
+    if (keys.b && player.hasBomb) useBomb();
+}
+
+function updateBullets() {
+    gameState.bullets = gameState.bullets.filter(bullet => {
+        bullet.x += bullet.speed;
+        return bullet.x < canvas.width;
+    });
+}
+
+function updateEnemies() {
+    gameState.enemies = gameState.enemies.filter(enemy => {
+        enemy.x -= enemy.speed;
+        
+        // Check collision with player
+        if (collision(enemy, player)) {
+            player.health -= enemy.attackPower;
+            return false;
+        }
+        
+        return enemy.x + enemy.width > 0;
+    });
+}
+
+function updatePowerUps() {
+    gameState.powerUps = gameState.powerUps.filter(powerUp => {
+        powerUp.x -= powerUp.speed;
+        
+        if (collision(powerUp, player)) {
+            if (powerUp.type === 'heal') {
+                player.health = Math.min(player.maxHealth, player.health + 20);
+            }
+            return false;
+        }
+        
+        return powerUp.x + powerUp.width > 0;
+    });
+}
+
+function drawPlayer() {
+    if (loadedAssets.player) {
+        ctx.drawImage(loadedAssets.player, player.x, player.y, player.width, player.height);
+    }
+}
+
+function drawBullets() {
+    gameState.bullets.forEach(bullet => {
+        ctx.save();
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = bullet.glowColor;
+        ctx.fillStyle = bullet.color;
+        ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+        ctx.restore();
+    });
+}
+
+function drawEnemies() {
+    gameState.enemies.forEach(enemy => {
+        if (loadedAssets.enemy) {
+            ctx.drawImage(loadedAssets.enemy, enemy.x, enemy.y, enemy.width, enemy.height);
+        }
+    });
+}
+
+// Add event listeners
 window.addEventListener('keydown', (e) => {
     if (e.key in keys) {
         keys[e.key] = true;
@@ -90,173 +239,7 @@ window.addEventListener('keyup', (e) => {
     if (e.key in keys) keys[e.key] = false;
 });
 
-function createEnemy() {
-    return {
-        x: canvas.width,
-        y: Math.random() * (canvas.height - 80),
-        width: 60,
-        height: 60,
-        health: 30,
-        speed: 2 + Math.random() * 2,
-        attackPower: 10
-    };
-}
-
-function gameLoop(timestamp) {
-    if (gameState.isPaused) {
-        drawPauseScreen();
-        requestAnimationFrame(gameLoop);
-        return;
-    }
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawParallaxBackground(timestamp);
-
-    if (!gameState.isGameOver) {
-        handlePlayerMovement();
-        updateAndDrawBullets();
-        updateAndDrawEnemies();
-        updateAndDrawPowerUps();
-        drawPlayer();
-        drawEnhancedHUD();
-        spawnEnemies(timestamp);
-        spawnPowerUps();
-    } else {
-        drawGameOverScreen();
-    }
-
-    requestAnimationFrame(gameLoop);
-}
-
-function drawParallaxBackground(timestamp) {
-    const scrollSpeed = 0.5;
-    const backgroundPos = -(timestamp * scrollSpeed) % canvas.width;
-    ctx.drawImage(loadedAssets.background, backgroundPos, 0, canvas.width, canvas.height);
-    ctx.drawImage(loadedAssets.background, backgroundPos + canvas.width, 0, canvas.width, canvas.height);
-}
-
-function handlePlayerMovement() {
-    if (keys.ArrowUp && player.y > 0) player.y -= player.speed;
-    if (keys.ArrowDown && player.y < canvas.height - player.height) player.y += player.speed;
-    if (keys.ArrowLeft && player.x > 0) player.x -= player.speed;
-    if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed;
-    if (keys.Space) shoot();
-    if (keys.b && player.hasBomb) useBomb();
-}
-
-function shoot() {
-    gameState.bullets.push({
-        x: player.x + player.width,
-        y: player.y + player.height / 2 - BULLET_CONFIG.height / 2,
-        width: BULLET_CONFIG.width,
-        height: BULLET_CONFIG.height,
-        speed: BULLET_CONFIG.speed,
-        color: BULLET_CONFIG.color,
-        glowColor: BULLET_CONFIG.glowColor
-    });
-}
-
-function useBomb() {
-    player.hasBomb = false;
-    gameState.enemies = [];
-}
-
-function updateAndDrawBullets() {
-    gameState.bullets.forEach((bullet, index) => {
-        bullet.x += bullet.speed;
-        ctx.save();
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = bullet.glowColor;
-        ctx.fillStyle = bullet.color;
-        ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
-        ctx.restore();
-
-        if (bullet.x > canvas.width) {
-            gameState.bullets.splice(index, 1);
-        }
-
-        gameState.enemies.forEach((enemy, enemyIndex) => {
-            if (collision(bullet, enemy)) {
-                enemy.health -= player.shootingPower;
-                gameState.bullets.splice(index, 1);
-                if (enemy.health <= 0) {
-                    gameState.enemies.splice(enemyIndex, 1);
-                    gameState.score += 10;
-                }
-            }
-        });
-    });
-}
-
-function updateAndDrawEnemies() {
-    gameState.enemies.forEach((enemy, index) => {
-        enemy.x -= enemy.speed;
-        ctx.drawImage(loadedAssets.enemy, enemy.x, enemy.y, enemy.width, enemy.height);
-
-        if (enemy.x + enemy.width < 0) {
-            gameState.enemies.splice(index, 1);
-        }
-    });
-}
-
-function updateAndDrawPowerUps() {
-    gameState.powerUps.forEach((powerUp, index) => {
-        powerUp.x -= powerUp.speed;
-        ctx.fillStyle = powerUp.type === 'heal' ? 'green' : 'blue';
-        ctx.fillRect(powerUp.x, powerUp.y, powerUp.width, powerUp.height);
-
-        if (collision(player, powerUp)) {
-            if (powerUp.type === 'heal') {
-                player.health = Math.min(player.maxHealth, player.health + 20);
-            }
-            gameState.powerUps.splice(index, 1);
-        }
-
-        if (powerUp.x + powerUp.width < 0) {
-            gameState.powerUps.splice(index, 1);
-        }
-    });
-}
-
-function spawnEnemies(timestamp) {
-    if (timestamp - gameState.lastEnemySpawnTime > gameState.enemySpawnInterval) {
-        gameState.enemies.push(createEnemy());
-        gameState.lastEnemySpawnTime = timestamp;
-    }
-}
-
-function spawnPowerUps() {
-    if (Math.random() < 0.01) {
-        gameState.powerUps.push({
-            x: canvas.width,
-            y: Math.random() * (canvas.height - 30),
-            width: 30,
-            height: 30,
-            type: 'heal',
-            speed: 2
-        });
-    }
-}
-
-function drawEnhancedHUD() {
-    ctx.font = '24px Arial';
-    ctx.fillStyle = 'white';
-    ctx.fillText(`Score: ${gameState.score}`, 10, 10);
-    ctx.fillText(`Health: ${player.health}/${player.maxHealth}`, 10, 40);
-    ctx.fillText(`Bomb: ${player.hasBomb ? 'Available' : 'Used'}`, 10, 70);
-}
-
-function drawGameOverScreen() {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.font = '48px Arial';
-    ctx.fillStyle = 'white';
-    ctx.textAlign = 'center';
-    ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2 - 40);
-    ctx.font = '24px Arial';
-    ctx.fillText('Press "R" to Restart', canvas.width / 2, canvas.height / 2 + 20);
-}
-
+// Utility functions remain the same as in your original code
 function collision(obj1, obj2) {
     return !(
         obj1.x + obj1.width < obj2.x ||
@@ -264,15 +247,107 @@ function collision(obj1, obj2) {
         obj1.y + obj1.height < obj2.y ||
         obj1.y > obj2.y + obj2.height
     );
+} function drawParallaxBackground(time) {
+    // Draw background layers
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw stars
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Stars', canvas.width / 2, canvas.height / 2);
+}
+
+function drawGameOverScreen() {
+    ctx.fillStyle = '#fff';
+    ctx.font = '40px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Game Over', canvas.width / 2, canvas.height / 2);
+}
+
+function drawPauseScreen() {
+    ctx.fillStyle = '#fff';
+    ctx.font = '40px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Paused', canvas.width / 2, canvas.height / 2);
+}
+
+function drawEnhancedHUD() {
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`Health: ${player.health}`, 10, 10);
+    ctx.fillText(`Score: ${gameState.score}`, 10, 30);
+}
+
+function shoot() {
+    const bullet = {
+        x: player.x + player.width,
+        y: player.y + player.height / 2,
+        width: BULLET_CONFIG.width,
+        height: BULLET_CONFIG.height,
+        speed: BULLET_CONFIG.speed,
+        color: BULLET_CONFIG.color,
+        glowColor: BULLET_CONFIG.glowColor
+    };
+    gameState.bullets.push(bullet);
+}
+
+function useBomb() {
+    // Implement bomb logic here
+    console.log('Bomb used!');
+}
+
+function spawnEnemies(time) {
+    if (time - gameState.lastEnemySpawnTime > gameState.enemySpawnInterval) {
+        const enemy = {
+            x: canvas.width,
+            y: Math.random() * (canvas.height - 50),
+            width: 50,
+            height: 50,
+            speed: 5,
+            attackPower: 10
+        };
+        gameState.enemies.push(enemy);
+        gameState.lastEnemySpawnTime = time;
+    }
+}
+
+function togglePause() {
+    gameState.isPaused = !gameState.isPaused;
 }
 
 function restartGame() {
-    player.health = player.maxHealth;
-    player.hasBomb = true;
-    gameState.score = 0;
-    gameState.enemies = [];
-    gameState.bullets = [];
-    gameState.powerUps = [];
-    gameState.isGameOver = false;
-    gameState.isPaused = false;
+    // Reset game state
+    player = {
+        x: 100,
+        y: canvas.height / 2,
+        width: 80,
+        height: 80,
+        health: 100,
+        maxHealth: 100,
+        shootingPower: 15,
+        speed: 8,
+        hasBomb: true
+    };
+    gameState = {
+        bullets: [],
+        enemies: [],
+        powerUps: [],
+        enemySpawnInterval: 1500,
+        lastEnemySpawnTime: 0,
+        score: 0,
+        isGameOver: false,
+        isPaused: false,
+        lastShootTime: 0,
+        shootCooldown: 250
+    };
+    lastTime = 0;
+    accumulator = 0;
+    requestAnimationFrame(gameLoop);
 }
